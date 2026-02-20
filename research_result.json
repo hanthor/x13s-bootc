@@ -1,0 +1,10 @@
+{
+  "workflow_steps": [
+    "Checkout repository",
+    "Install dependencies (if needed)",
+    "Run ublue-os/titanoboa action"
+  ],
+  "builder_tool": "ublue-os/titanoboa (uses lorax/mkksiso under the hood)",
+  "injection_method": "kargs input for kernel arguments. For DTB, use hook-post-rootfs to copy the DTB into /boot/dtb or similar in the live OS, OR extend the titanoboa builder image to include the DTB in the bootloader configuration if possible. However, the most reliable way with the current action is likely injecting it into the workdir or using a custom script that modifies the ISO content after generation if titanoboa doesn't support direct ESP injection.",
+  "upstream_workflow_url": "https://github.com/projectbluefin/iso/blob/main/.github/workflows/reusable-build-iso-anaconda.yml"
+}

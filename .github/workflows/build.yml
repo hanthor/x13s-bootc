@@ -1,0 +1,70 @@
+name: Build X13s Bootc ISO
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build-iso:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xorriso mtools wget
+
+      - name: Fetch DTB
+        run: ./scripts/fetch-dtb.sh
+
+      - name: Build ISO with bootc-image-builder
+        uses: centos-bootc/bootc-image-builder-action@v1
+        with:
+          # Use the upstream Bluefin LTS image as the source
+          # You can change this to 'ghcr.io/ublue-os/aurora:latest' or your custom image
+          image: ghcr.io/ublue-os/bluefin-lts:latest
+          
+          # We need to manually inject filesystem content? No, we'll patch the ISO after.
+          # We can set kernel arguments here for the *installed* system primarily.
+          # For the installer environment itself, we might need the post-processing.
+          output-type: anaconda-iso
+          
+      - name: Identify ISO Artifact
+        id: find-iso
+        run: |
+          # The action outputs to 'output/' by default, usually 'output/bootiso/install.iso'
+          ISO_PATH=$(find output -name "*.iso" | head -n 1)
+          if [ -z "$ISO_PATH" ]; then
+             echo "Error: ISO not found!"
+             exit 1
+          fi
+          echo "iso_path=$ISO_PATH" >> $GITHUB_OUTPUT
+          
+      - name: Inject ThinkPad X13s Support (DTB + ISO Config)
+        run: |
+          INPUT_ISO="${{ steps.find-iso.outputs.iso_path }}"
+          OUTPUT_ISO="./bluefin-x13s-installer.iso"
+          DTB_FILE="./assets/sc8280xp-lenovo-thinkpad-x13s.dtb"
+          
+          echo "Injecting DTB into $INPUT_ISO..."
+          ./scripts/inject-dtb-iso.sh "$INPUT_ISO" "$OUTPUT_ISO" "$DTB_FILE"
+          
+          # Optional: Use mkksiso (if available) to inject Kernel Args into the ISO bootloader
+          # sudo apt-get install -y lorax # (might be heavy or unavailable in Ubuntu repo)
+          # For now, relying on the user to manually add args or using our 'patch-usb.sh' 
+          # is safer unless we pull a fedora container for this step.
+          
+      - name: Upload ISO Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bluefin-x13s-installer
+          path: ./bluefin-x13s-installer.iso
+          compression-level: 0 # ISOs are already compressed
