@@ -52,10 +52,23 @@ echo "Repacking ISO with xorriso (ARM64 UEFI configuration)..."
 # ARM64 systems are strictly UEFI and do not use ISOLINUX or MBR boot code.
 # We use xorriso to create a GPT partition table with the EFI boot image exposed as an ESP.
 
+# Find the EFI boot image path (it varies between Fedora and Bluefin/bootc ISOs)
+EFI_IMG_PATH=""
+if [ -f "$WORK_DIR/iso_root/images/efiboot.img" ]; then
+    EFI_IMG_PATH="images/efiboot.img"
+elif [ -f "$WORK_DIR/iso_root/boot/eltorito.img" ]; then
+    EFI_IMG_PATH="boot/eltorito.img"
+else
+    echo "Error: Could not find EFI boot image (efiboot.img or eltorito.img) in ISO root."
+    exit 1
+fi
+
+echo "Using EFI boot image: $EFI_IMG_PATH"
+
 xorriso -as mkisofs \
     -r -V "Fedora-Workstation-Live" \
     -J -joliet-long \
-    -e images/efiboot.img \
+    -e "$EFI_IMG_PATH" \
     -no-emul-boot \
     -isohybrid-gpt-basdat \
     -o "$OUTPUT_ISO" \
