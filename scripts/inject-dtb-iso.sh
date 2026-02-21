@@ -64,6 +64,7 @@ fi
 # Repack with mkisofs, trying with full boot options first
 if [ -n "$MBR_FILE" ]; then
     mkisofs \
+        -allow-limited-size \
         -R -J \
         -V "Fedora-Workstation-Live" \
         -o "$OUTPUT_ISO" \
@@ -76,9 +77,9 @@ if [ -n "$MBR_FILE" ]; then
         -no-emul-boot \
         -isohybrid-mbr "$MBR_FILE" \
         "$WORK_DIR/iso_root" 2>/dev/null || \
-        mkisofs -R -J -o "$OUTPUT_ISO" "$WORK_DIR/iso_root"
+        mkisofs -allow-limited-size -R -J -o "$OUTPUT_ISO" "$WORK_DIR/iso_root"
 else
-    mkisofs -R -J -o "$OUTPUT_ISO" "$WORK_DIR/iso_root"
+    mkisofs -allow-limited-size -R -J -o "$OUTPUT_ISO" "$WORK_DIR/iso_root"
 fi
 
 echo "Done! Modified ISO saved to $OUTPUT_ISO"
