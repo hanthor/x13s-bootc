@@ -39,13 +39,12 @@ KERNEL_ARGS="efi=noruntime pd_ignore_unused clk_ignore_unused arm64.nopauth"
 
 find "$WORK_DIR/iso_root" -name "grub.cfg" -type f | while read -r cfg; do
     echo "Patching $cfg"
-    # Add kernel arguments to linux/linuxefi lines
-    sed -i "s|linux .*|& $KERNEL_ARGS|g" "$cfg"
-    sed -i "s|linuxefi .*|& $KERNEL_ARGS|g" "$cfg"
+    # Match indented linux/linuxefi lines (the actual boot entries, not menuentry labels)
+    sed -i "s|  linux .*|& $KERNEL_ARGS|g" "$cfg"
+    sed -i "s|  linuxefi .*|& $KERNEL_ARGS|g" "$cfg"
     
     # Add devicetree command after initrd/initrdefi lines
-    # We use awk to insert the line right after initrd
-    awk '/initrd/ {print; print "  devicetree /sc8280xp-lenovo-thinkpad-x13s.dtb"; next}1' "$cfg" > "${cfg}.tmp" && mv "${cfg}.tmp" "$cfg"
+    awk '/^  initrd/ {print; print "  devicetree /sc8280xp-lenovo-thinkpad-x13s.dtb"; next}1' "$cfg" > "${cfg}.tmp" && mv "${cfg}.tmp" "$cfg"
 done
 
 echo "Repacking ISO with xorriso (ARM64 UEFI configuration)..."
@@ -75,6 +74,20 @@ EFI_IMG="$WORK_DIR/efi_partition.img"
 EFI_COUNT=$(( EFI_END - EFI_START + 1 ))
 dd if="$INPUT_ISO" of="$EFI_IMG" bs=512 skip="$EFI_START" count="$EFI_COUNT" status=none
 echo "Extracted EFI partition image: $(stat -c%s "$EFI_IMG") bytes"
+
+echo "Patching grub.cfg inside EFI partition FAT32 image..."
+# The EFI partition FAT32 contains its own grub.cfg which GRUB loads at boot.
+# We must patch this copy or the kernel args will never be applied.
+PATCHED_GRUB=$(mktemp)
+mtype -i "$EFI_IMG" ::/EFI/BOOT/grub.cfg > "$PATCHED_GRUB"
+KERNEL_ARGS="efi=noruntime pd_ignore_unused clk_ignore_unused arm64.nopauth"
+sed -i "s|  linux .*|& $KERNEL_ARGS|g" "$PATCHED_GRUB"
+# Insert devicetree command after the initrd line
+awk '/^  initrd/ {print; print "  devicetree /sc8280xp-lenovo-thinkpad-x13s.dtb"; next}1' "$PATCHED_GRUB" > "${PATCHED_GRUB}.tmp" && mv "${PATCHED_GRUB}.tmp" "$PATCHED_GRUB"
+# Write the patched grub.cfg back into the FAT32 image
+mcopy -o -i "$EFI_IMG" "$PATCHED_GRUB" ::/EFI/BOOT/grub.cfg
+rm -f "$PATCHED_GRUB"
+echo "EFI partition grub.cfg patched."
 
 # Extract the original MBR/GPT sectors (first 16 sectors) to replicate the exact
 # protective MBR and any GPT entries
