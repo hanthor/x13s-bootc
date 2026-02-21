@@ -48,38 +48,17 @@ find "$WORK_DIR/iso_root" -name "grub.cfg" -type f | while read -r cfg; do
     awk '/initrd/ {print; print "  devicetree /sc8280xp-lenovo-thinkpad-x13s.dtb"; next}1' "$cfg" > "${cfg}.tmp" && mv "${cfg}.tmp" "$cfg"
 done
 
-echo "Repacking ISO with mkisofs (preserving boot configuration)..."
-# Use mkisofs to recreate the ISO with the same boot parameters
+echo "Repacking ISO with xorriso (ARM64 UEFI configuration)..."
+# ARM64 systems are strictly UEFI and do not use ISOLINUX or MBR boot code.
+# We use xorriso to create a GPT partition table with the EFI boot image exposed as an ESP.
 
-# Try to extract isohdpfx.bin from the original ISO (used for hybrid ISO), fallback to system version
-MBR_FILE=""
-if xorriso -osirrox on -indev "$INPUT_ISO" -extract /isolinux/isohdpfx.bin "$WORK_DIR/isohdpfx.bin" 2>/dev/null; then
-    MBR_FILE="$WORK_DIR/isohdpfx.bin"
-elif [ -f /usr/lib/ISOLINUX/isohdpfx.bin ]; then
-    MBR_FILE="/usr/lib/ISOLINUX/isohdpfx.bin"
-elif [ -f /usr/lib/syslinux/isohdpfx.bin ]; then
-    MBR_FILE="/usr/lib/syslinux/isohdpfx.bin"
-fi
-
-# Repack with mkisofs, trying with full boot options first
-if [ -n "$MBR_FILE" ]; then
-    mkisofs \
-        -allow-limited-size \
-        -R -J \
-        -V "Fedora-Workstation-Live" \
-        -o "$OUTPUT_ISO" \
-        -b isolinux/isolinux.bin \
-        -c isolinux/boot.cat \
-        -boot-load-size 4 \
-        -boot-info-table \
-        -eltorito-alt-boot \
-        -e images/efiboot.img \
-        -no-emul-boot \
-        -isohybrid-mbr "$MBR_FILE" \
-        "$WORK_DIR/iso_root" 2>/dev/null || \
-        mkisofs -allow-limited-size -R -J -o "$OUTPUT_ISO" "$WORK_DIR/iso_root"
-else
-    mkisofs -allow-limited-size -R -J -o "$OUTPUT_ISO" "$WORK_DIR/iso_root"
-fi
+xorriso -as mkisofs \
+    -r -V "Fedora-Workstation-Live" \
+    -J -joliet-long \
+    -e images/efiboot.img \
+    -no-emul-boot \
+    -isohybrid-gpt-basdat \
+    -o "$OUTPUT_ISO" \
+    "$WORK_DIR/iso_root"
 
 echo "Done! Modified ISO saved to $OUTPUT_ISO"
