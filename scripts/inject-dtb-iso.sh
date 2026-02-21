@@ -17,31 +17,68 @@ fi
 WORK_DIR=$(mktemp -d)
 trap "rm -rf $WORK_DIR" EXIT
 
-echo "Extracting EFIBOOT image from $INPUT_ISO..."
-# Extract the EFI system partition image. In Fedora/CentOS ISOs this is usually images/efiboot.img
-xorriso -osirrox on -indev "$INPUT_ISO" -extract /images/efiboot.img "$WORK_DIR/efiboot.img"
+echo "Extracting ISO contents..."
+# Extract the entire ISO to a temporary directory
+xorriso -osirrox on -indev "$INPUT_ISO" -extract / "$WORK_DIR/iso_root"
 
-if [ ! -f "$WORK_DIR/efiboot.img" ]; then
-    echo "Error: Could not find /images/efiboot.img in the ISO. Is this a standard Fedora/Bluefin ISO?"
+if [ ! -d "$WORK_DIR/iso_root" ]; then
+    echo "Error: Could not extract ISO contents."
     exit 1
 fi
 
-echo "Injecting DTB into EFI image..."
-# Use mcopy to copy the file into the FAT filesystem image
-# We place it at the root of the ESP, where our earlier scripts expect it
-mcopy -i "$WORK_DIR/efiboot.img" "$DTB_FILE" ::/sc8280xp-lenovo-thinkpad-x13s.dtb
+echo "Copying DTB to ISO root..."
+# Copy the DTB to the root of the ISO filesystem
+cp "$DTB_FILE" "$WORK_DIR/iso_root/sc8280xp-lenovo-thinkpad-x13s.dtb"
 
 # Verify it's there
-mdir -i "$WORK_DIR/efiboot.img" ::/
+ls -lh "$WORK_DIR/iso_root/sc8280xp-lenovo-thinkpad-x13s.dtb"
 
-echo "Repacking ISO..."
-# Create a new ISO with the modified EFI image.
-# We use xorriso to load the old ISO, replace the file, and write the new one.
-# -boot_image any keep tells xorriso to preserve boot settings.
-xorriso -dev "$INPUT_ISO" \
-    -boot_image any keep \
-    -map "$WORK_DIR/efiboot.img" /images/efiboot.img \
-    -commit \
-    -outdev "$OUTPUT_ISO"
+echo "Patching GRUB configuration..."
+# Find and patch grub.cfg to include the devicetree command and kernel args
+KERNEL_ARGS="efi=noruntime pd_ignore_unused clk_ignore_unused arm64.nopauth"
+
+find "$WORK_DIR/iso_root" -name "grub.cfg" -type f | while read -r cfg; do
+    echo "Patching $cfg"
+    # Add kernel arguments to linux/linuxefi lines
+    sed -i "s|linux .*|& $KERNEL_ARGS|g" "$cfg"
+    sed -i "s|linuxefi .*|& $KERNEL_ARGS|g" "$cfg"
+    
+    # Add devicetree command after initrd/initrdefi lines
+    # We use awk to insert the line right after initrd
+    awk '/initrd/ {print; print "  devicetree /sc8280xp-lenovo-thinkpad-x13s.dtb"; next}1' "$cfg" > "${cfg}.tmp" && mv "${cfg}.tmp" "$cfg"
+done
+
+echo "Repacking ISO with mkisofs (preserving boot configuration)..."
+# Use mkisofs to recreate the ISO with the same boot parameters
+
+# Try to extract isohdpfx.bin from the original ISO (used for hybrid ISO), fallback to system version
+MBR_FILE=""
+if xorriso -osirrox on -indev "$INPUT_ISO" -extract /isolinux/isohdpfx.bin "$WORK_DIR/isohdpfx.bin" 2>/dev/null; then
+    MBR_FILE="$WORK_DIR/isohdpfx.bin"
+elif [ -f /usr/lib/ISOLINUX/isohdpfx.bin ]; then
+    MBR_FILE="/usr/lib/ISOLINUX/isohdpfx.bin"
+elif [ -f /usr/lib/syslinux/isohdpfx.bin ]; then
+    MBR_FILE="/usr/lib/syslinux/isohdpfx.bin"
+fi
+
+# Repack with mkisofs, trying with full boot options first
+if [ -n "$MBR_FILE" ]; then
+    mkisofs \
+        -R -J \
+        -V "Fedora-Workstation-Live" \
+        -o "$OUTPUT_ISO" \
+        -b isolinux/isolinux.bin \
+        -c isolinux/boot.cat \
+        -boot-load-size 4 \
+        -boot-info-table \
+        -eltorito-alt-boot \
+        -e images/efiboot.img \
+        -no-emul-boot \
+        -isohybrid-mbr "$MBR_FILE" \
+        "$WORK_DIR/iso_root" 2>/dev/null || \
+        mkisofs -R -J -o "$OUTPUT_ISO" "$WORK_DIR/iso_root"
+else
+    mkisofs -R -J -o "$OUTPUT_ISO" "$WORK_DIR/iso_root"
+fi
 
 echo "Done! Modified ISO saved to $OUTPUT_ISO"
