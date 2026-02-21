@@ -16,7 +16,7 @@ This repository contains tools to make Bluefin, Bluefin LTS, and Aurora (Fedora 
    ./scripts/fetch-dtb.sh
    ```
 
-2. **Patch the USB Installer:**
+2. **Method A: Patch the USB Installer (Manual):**
    After writing the Bluefin/Aurora ISO to a USB drive, run this script to inject the DTB and set kernel arguments.
    ```bash
    sudo ./scripts/patch-usb.sh /dev/sdX
@@ -24,20 +24,46 @@ This repository contains tools to make Bluefin, Bluefin LTS, and Aurora (Fedora 
    sudo ./scripts/patch-usb.sh /run/media/user/FEDORA-WS-LIVE
    ```
 
-3. **Build Custom Bootc Image (Optional):**
-   If you want to create a custom Bluefin image that includes the DTB (for future `bootc` updates), you can build the provided Containerfile.
+3. **Method B: Create a Modified ISO (Automated):**
+   Use the injection script to create a new ISO that already has the DTB embedded in its root:
    ```bash
-   podman build -t localhost/bluefin-x13s:latest .
+   # First download a Bluefin/Aurora ISO
+   wget https://example.com/bluefin-lts-installer.iso
+   
+   # Then inject the DTB (using a container, ideal for immutable OSes)
+   ./scripts/run-in-container.sh bluefin-lts-installer.iso bluefin-x13s-installer.iso ./assets/sc8280xp-lenovo-thinkpad-x13s.dtb
+   
+   # Write the modified ISO to USB
+   sudo dd if=bluefin-x13s-installer.iso of=/dev/sdX bs=4M status=progress && sync
    ```
-   Then you can rebase your system to this image:
-   ```bash
-   bootc switch localhost/bluefin-x13s:latest
-   ```
-4. **GitHub Actions (CI/CD):**
+
+
+3. **GitHub Actions (CI/CD - Automated):**
    This repository includes a GitHub Action to automatically build a bootable ISO with the X13s DTB injected.
-   - Fork this repo.
-   - Trigger the "Build X13s Bootc ISO" workflow.
-   - Download the `bluefin-x13s-installer` artifact.
-   - Flash to USB and boot (you may still need to add kernel args manually on the very first boot if not using `mkksiso`).
+   - Push to `main` or `master` branch, or manually trigger workflow in GitHub
+   - Download the `bluefin-x13s-installer` artifact
+   - Write to USB: `sudo dd if=bluefin-x13s-installer.iso of=/dev/sdX bs=4M status=progress && sync`
+
+## Installation & First Boot
+
+After booting the modified ISO or installed system on the ThinkPad X13s:
+
+1. **At UEFI/GRUB:**
+   The DTB file should be accessible. If kernel arguments aren't automatically applied, add them manually:
+   ```
+   arm64.nopauth clk_ignore_unused pd_ignore_unused
+   ```
+
+2. **After Installation (if not set automatically):**
+   ```bash
+   sudo rpm-ostree kargs --append="arm64.nopauth clk_ignore_unused pd_ignore_unused"
+   sudo reboot
+   ```
+
+3. **Verify DTB is loaded:**
+   ```bash
+   cat /proc/device-tree/model
+   dmesg | grep -i "device.tree\|compatible"
+   ```
 
 ## Troubleshooting
