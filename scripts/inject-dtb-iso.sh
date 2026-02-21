@@ -66,6 +66,7 @@ fi
 echo "Using EFI boot image: $EFI_IMG_PATH"
 
 xorriso -as mkisofs \
+    -allow-limited-size \
     -r -V "Fedora-Workstation-Live" \
     -J -joliet-long \
     -e "$EFI_IMG_PATH" \
