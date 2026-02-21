@@ -1,21 +1,18 @@
 FROM ghcr.io/ublue-os/bluefin-lts:latest
 
 # Copy the X13s DTB to the image
-# It needs to be in a place where it can be copied to the ESP during install or boot.
-# For OSTree systems, /usr/lib/modules/$KVER/dtb/ is standard, but the bootloader needs it in ESP.
-# We can use a systemd service or a modprobe config to help, but physically moving it to ESP is key.
-# A simple approach: Place it in /usr/share/x13s/ and have a script handling it,
-# or try to put it in /boot/dtb (which might not persist/deploy correctly in all setups).
+# For OSTree/bootc systems, placing the DTB in /usr/lib/modules/$KVER/dtb/qcom/
+# ensures that OSTree automatically copies it to /boot/ostree/.../dtb/ during deployment
+# and adds an `fdtdir` entry to the Boot Loader Specification (BLS) config.
+COPY assets/sc8280xp-lenovo-thinkpad-x13s.dtb /tmp/
 
-COPY assets/sc8280xp-lenovo-thinkpad-x13s.dtb /usr/lib/firmware/
-COPY assets/sc8280xp-lenovo-thinkpad-x13s.dtb /boot/efi/
+RUN KVER=$(ls /usr/lib/modules | head -n 1) && \
+    mkdir -p /usr/lib/modules/$KVER/dtb/qcom && \
+    cp /tmp/sc8280xp-lenovo-thinkpad-x13s.dtb /usr/lib/modules/$KVER/dtb/qcom/
 
-# Add a script explicitly to copy DTB to ESP on boot if missing
-COPY scripts/ensure-x13s-dtb.service /etc/systemd/system/
-COPY scripts/ensure-x13s-dtb.sh /usr/bin/
+# Configure kernel arguments for bootc
+# bootc will automatically apply these kernel arguments to the bootloader configuration
+# during installation and updates.
+RUN mkdir -p /usr/lib/bootc/kargs.d && \
+    echo 'kargs = ["efi=noruntime", "clk_ignore_unused", "pd_ignore_unused", "arm64.nopauth"]' > /usr/lib/bootc/kargs.d/10-x13s.toml
 
-RUN systemctl enable ensure-x13s-dtb.service
-
-# Append kernel args to the internal preset if possible, or leave for `bootc install --karg`
-# Modifying /usr/lib/bootupd/updates is complex.
-# We rely on user using `bootc install --karg` for the initial install args.
